@@ -1,0 +1,72 @@
+#!/bin/bash
+# hypr-dictate — Toggle dictation on Hyprland/Wayland.
+# Press once to record, press again to transcribe and paste.
+# Requires: pw-record, ncat, jq, ydotool, wl-copy, notify-send, hyprctl
+
+set -euo pipefail
+
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+SOCK_PATH="$RUNTIME_DIR/hypr-dictate.sock"
+
+PIDFILE="/tmp/hypr-dictate.pid"
+AUDIO="/tmp/hypr-dictate.wav"
+WCLASSFILE="/tmp/hypr-dictate.wclass"
+
+# Auto-start transcription server if not running
+if [ ! -S "$SOCK_PATH" ]; then
+    nohup hypr-dictate-server >"${RUNTIME_DIR}/hypr-dictate-server.log" 2>&1 &
+    for _ in $(seq 1 30); do
+        [ -S "$SOCK_PATH" ] && break
+        sleep 0.5
+    done
+    if [ ! -S "$SOCK_PATH" ]; then
+        notify-send -u critical -t 5000 "Dictation" "Server failed to start"
+        exit 1
+    fi
+fi
+
+# If recording, stop and transcribe
+PID=$(cat "$PIDFILE" 2>/dev/null) || true
+if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+    kill "$PID" 2>/dev/null
+    wait "$PID" 2>/dev/null || true
+    rm -f "$PIDFILE"
+
+    # Transcribe via unix socket
+    TEXT=$(echo "$AUDIO" | ncat -U "$SOCK_PATH")
+
+    rm -f "$AUDIO"
+
+    # Check for server-side errors
+    if echo "$TEXT" | grep -q "^ERROR:"; then
+        ERRMSG=$(echo "$TEXT" | sed 's/^ERROR://')
+        if echo "$ERRMSG" | grep -qi "cuda\|cublas\|memory"; then
+            notify-send -u critical -t 5000 "Dictation" "GPU out of memory — close GPU apps and retry"
+        else
+            notify-send -u critical -t 5000 "Dictation" "Transcription error: $ERRMSG"
+        fi
+    elif [ -n "$TEXT" ]; then
+        wl-copy "$TEXT"
+        # Use window class captured at record-start time
+        WCLASS=$(cat "$WCLASSFILE" 2>/dev/null) || true
+        rm -f "$WCLASSFILE"
+        case "$WCLASS" in
+            com.mitchellh.ghostty|kitty|Alacritty|foot|org.wezfurlong.wezterm)
+                # Ctrl+Shift+V for terminals
+                ydotool key 29:1 42:1 47:1 47:0 42:0 29:0 ;;
+            *)
+                # Ctrl+V for everything else
+                ydotool key 29:1 47:1 47:0 29:0 ;;
+        esac
+    else
+        notify-send -t 2000 "Dictation" "No speech detected"
+    fi
+else
+    # Capture window class now (before transcription delay)
+    hyprctl activewindow -j | jq -r '.class' > "$WCLASSFILE" &
+
+    rm -f "$AUDIO"
+    pw-record --rate 16000 "$AUDIO" &
+    echo $! > "$PIDFILE"
+    notify-send -t 1500 "Dictation" "Recording..."
+fi
