@@ -1,7 +1,7 @@
 #!/bin/bash
 # yappie — Toggle dictation on Wayland.
 # Press once to record, press again to transcribe and paste.
-# Requires: pw-record, curl, ncat, jq, ydotool, wl-copy, notify-send, hyprctl
+# Requires: pw-record, curl, ncat, jq, ydotool, wl-copy, notify-send
 
 set -euo pipefail
 
@@ -137,6 +137,18 @@ transcribe() {
 }
 
 # ---------------------------------------------------------------------------
+# Window class detection (compositor-agnostic)
+# ---------------------------------------------------------------------------
+
+get_window_class() {
+    if command -v hyprctl >/dev/null 2>&1; then
+        hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' 2>/dev/null
+    elif command -v swaymsg >/dev/null 2>&1; then
+        swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .app_id // empty' 2>/dev/null
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Main — toggle recording
 # ---------------------------------------------------------------------------
 
@@ -168,7 +180,7 @@ if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
     fi
 else
     # Start recording
-    hyprctl activewindow -j | jq -r '.class' > "$WCLASSFILE" &
+    get_window_class > "$WCLASSFILE" &
     rm -f "$AUDIO"
     pw-record --rate 16000 "$AUDIO" &
     echo "$!" > "$PIDFILE"

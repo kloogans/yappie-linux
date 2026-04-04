@@ -11,7 +11,7 @@ echo "Installing yappie..."
 
 # Check dependencies
 MISSING=()
-for cmd in pw-record curl ncat jq ydotool wl-copy notify-send hyprctl; do
+for cmd in pw-record curl ncat jq ydotool wl-copy notify-send; do
     command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
 done
 
@@ -19,7 +19,7 @@ if [ ${#MISSING[@]} -gt 0 ]; then
     echo "Missing dependencies: ${MISSING[*]}"
     echo ""
     echo "On Arch Linux:"
-    echo "  sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify hyprland"
+    echo "  sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify"
     echo ""
     echo "Install missing packages and re-run this script."
     exit 1

@@ -1,6 +1,6 @@
 # yappie-linux
 
-Fast, local-first dictation for Linux/Wayland. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on.
+Voice dictation for Wayland. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on.
 
 Part of the [yappie](https://github.com/kloogans) family. Local dictation for every platform.
 
@@ -41,10 +41,16 @@ Then edit `~/.config/yappie/config.toml` to add at least one backend.
 
 ### Keybinding
 
-Add this to your Hyprland config:
+Bind `yappie` to a key in your compositor. For example, in Hyprland:
 
 ```
 bindd = SUPER, D, Dictation, exec, yappie
+```
+
+In Sway:
+
+```
+bindsym $mod+d exec yappie
 ```
 
 ## Backends
@@ -122,12 +128,20 @@ api_key = "gsk_..."
 | ydotool | Simulated keypresses for pasting |
 | wl-clipboard | Clipboard access (`wl-copy`) |
 | libnotify | Desktop notifications |
-| Hyprland | Window class detection (`hyprctl`) |
+
+**Optional** (for smart terminal paste detection):
+
+| Package | Compositor |
+|---|---|
+| Hyprland | `hyprctl` |
+| Sway | `swaymsg` |
+
+Without either, yappie defaults to Ctrl+V for all windows. With one installed, it detects terminals and uses Ctrl+Shift+V instead.
 
 On Arch:
 
 ```bash
-sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify hyprland
+sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify
 ```
 
 ## Uninstall
