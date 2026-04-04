@@ -1,25 +1,17 @@
 # yappie-linux
 
-Fast local dictation for Linux/Wayland. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on.
+Fast, local-first dictation for Linux/Wayland. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on.
 
 Part of the [yappie](https://github.com/kloogans) family — local dictation for every platform.
 
-It runs a persistent server that keeps the model loaded between requests, so after the first transcription subsequent ones take around 150ms. Supports multiple backends out of the box:
-
-| Backend | Package | Best for |
-|---|---|---|
-| [faster-whisper](https://github.com/SYSTRAN/faster-whisper) | `faster-whisper` | GPU transcription (default) |
-| [Moonshine](https://github.com/usefulsensors/moonshine) | `useful-moonshine-onnx` | Lightweight CPU inference |
-| [Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) | `nemo_toolkit[asr]` | Best accuracy-to-size ratio |
+Yappie is a thin client. It records audio, sends it to any transcription backend you configure, and pastes the result. Bring your own backend — a local server, a cloud API, or both with automatic fallback.
 
 ## How it works
 
 1. **Press Super+D** to start recording via PipeWire
-2. **Press Super+D again** to stop recording and send the audio to the server
-3. The server transcribes it using whisper large-v3-turbo with greedy decoding and VAD filtering
-4. The text gets copied to your clipboard and pasted into the focused window (Ctrl+Shift+V for terminals, Ctrl+V for everything else)
-
-The server (`yappie-server`) is a small Python daemon that loads the whisper model once and listens on a unix socket. It auto-starts the first time you use it and stays running in the background.
+2. **Press Super+D again** to stop recording
+3. Yappie sends the audio to your configured backends in order until one succeeds
+4. The text gets copied to your clipboard and pasted into the focused window
 
 ## Install
 
@@ -29,89 +21,111 @@ cd yappie-linux
 bash install.sh
 ```
 
-Then add this to your Hyprland config (e.g. `~/.config/hypr/bindings.conf`):
+Then edit `~/.config/yappie/config.toml` to configure your backends, and add this to your Hyprland config:
 
 ```
 bindd = SUPER, D, Dictation, exec, yappie
 ```
 
-The whisper model (~1.5 GB) downloads automatically the first time you dictate something.
+### Arch Linux (AUR)
+
+```bash
+yay -S yappie
+```
+
+Then copy the example config and edit it:
+
+```bash
+cp /usr/share/yappie/config.example.toml ~/.config/yappie/config.toml
+$EDITOR ~/.config/yappie/config.toml
+```
+
+## Backends
+
+Yappie supports two backend types. Configure one or more in `~/.config/yappie/config.toml`. Backends are tried in order — first success wins.
+
+### OpenAI-compatible API
+
+Works with any service that implements `/v1/audio/transcriptions`:
+
+| Service | Base URL | API key required |
+|---|---|---|
+| [OpenAI](https://platform.openai.com) | `https://api.openai.com/v1` | Yes |
+| [Groq](https://groq.com) | `https://api.groq.com/openai/v1` | Yes |
+| [faster-whisper-server](https://github.com/fedirz/faster-whisper-server) | `http://localhost:8000/v1` | No |
+| [LocalAI](https://localai.io) | `http://localhost:8080/v1` | No |
+
+```toml
+[[backend]]
+name = "groq"
+type = "api"
+url = "https://api.groq.com/openai/v1"
+model = "whisper-large-v3-turbo"
+api_key = "your-api-key-here"
+```
+
+API keys can be inline or stored in a file:
+
+```toml
+api_key_file = "~/.config/yappie/keys/groq"
+```
+
+### Custom TCP
+
+For custom transcription servers that accept raw WAV audio over a TCP socket and return UTF-8 text.
+
+```toml
+[[backend]]
+name = "my-server"
+type = "tcp"
+host = "127.0.0.1"
+port = 9876
+```
+
+## Configuration
+
+`~/.config/yappie/config.toml` — backends are tried in order, first success wins:
+
+```toml
+# Local server as primary, Groq as fallback
+[[backend]]
+name = "local"
+type = "api"
+url = "http://localhost:8000/v1"
+model = "large-v3-turbo"
+
+[[backend]]
+name = "groq"
+type = "api"
+url = "https://api.groq.com/openai/v1"
+model = "whisper-large-v3-turbo"
+api_key = "gsk_..."
+```
 
 ## Dependencies
 
 | Package | What it's for |
 |---|---|
 | PipeWire | Audio recording (`pw-record`) |
-| nmap | Socket communication (`ncat`) |
-| jq | JSON parsing for window detection |
+| curl | API backend requests |
+| nmap | TCP backend communication (`ncat`) |
+| jq | JSON parsing |
 | ydotool | Simulated keypresses for pasting |
 | wl-clipboard | Clipboard access (`wl-copy`) |
 | libnotify | Desktop notifications |
 | Hyprland | Window class detection (`hyprctl`) |
-| WirePlumber | Volume save/restore (`wpctl`) |
-| Python 3.10+ | Server runtime |
-| NVIDIA GPU | Recommended, but CPU works too |
 
 On Arch:
-```bash
-sudo pacman -S pipewire nmap jq ydotool wl-clipboard libnotify hyprland wireplumber
-```
-
-## Configuration
-
-Edit `~/.config/yappie/config`:
 
 ```bash
-BACKEND=faster-whisper   # faster-whisper, moonshine, or parakeet
-MODEL=large-v3-turbo     # model name (depends on backend)
-DEVICE=cuda              # cuda, cpu, or auto
-COMPUTE_TYPE=int8        # float16, int8, or float32
-BEAM_SIZE=1              # 1 = fastest, 5 = most accurate
-VAD_FILTER=true          # skip silence
-HOST=0.0.0.0             # server bind address
-PORT=9876                # server port
+sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify hyprland
 ```
-
-Each backend has sensible defaults, so you really only need to set `BACKEND` and `MODEL`. The rest is optional.
-
-### Switching backends
-
-```bash
-# Moonshine on CPU (lightweight, no GPU needed)
-BACKEND=moonshine
-MODEL=moonshine/base
-
-# Parakeet (600M params, great accuracy)
-BACKEND=parakeet
-MODEL=nvidia/parakeet-tdt-0.6b-v2
-
-# Whisper on CPU
-BACKEND=faster-whisper
-DEVICE=cpu
-COMPUTE_TYPE=float32
-MODEL=small
-```
-
-Restart the server after changing backends (`pkill yappie-server`). It will auto-start on the next dictation.
-
-## Why it's fast
-
-Most of the work here was finding and eliminating the things that made dictation feel slow, even when the model itself was fast:
-
-- **Persistent server** keeps the model loaded. No cold start on each request.
-- **beam_size=1** uses greedy decoding instead of beam search. About 5x faster with no real accuracy difference for spoken dictation.
-- **VAD filtering** trims silence from the start and end of recordings so the model only processes actual speech.
-- **int8 quantization** cuts memory usage in half and speeds up inference.
-- **ncat for IPC** instead of spawning a Python subprocess on every request.
-- **jq for window detection** instead of a second Python subprocess.
 
 ## Uninstall
 
 ```bash
 bash uninstall.sh
 ```
-
-Removes the scripts and Python venv. Your config at `~/.config/yappie/` is left in place in case you want it later.
 
 ## License
 

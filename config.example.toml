@@ -1,0 +1,35 @@
+# Yappie configuration
+# Backends are tried in order. First success wins.
+# Docs: https://github.com/kloogans/yappie-linux
+
+# --- Local server (e.g. faster-whisper-server, LocalAI) ---
+# [[backend]]
+# name = "local"
+# type = "api"
+# url = "http://localhost:8000/v1"
+# model = "large-v3-turbo"
+
+# --- Groq (fast cloud transcription) ---
+# [[backend]]
+# name = "groq"
+# type = "api"
+# url = "https://api.groq.com/openai/v1"
+# model = "whisper-large-v3-turbo"
+# api_key = "your-api-key-here"
+# # Or store the key in a file:
+# # api_key_file = "~/.config/yappie/keys/groq"
+
+# --- OpenAI ---
+# [[backend]]
+# name = "openai"
+# type = "api"
+# url = "https://api.openai.com/v1"
+# model = "whisper-1"
+# api_key = "your-api-key-here"
+
+# --- Custom TCP server ---
+# [[backend]]
+# name = "custom"
+# type = "tcp"
+# host = "127.0.0.1"
+# port = 9876

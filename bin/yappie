@@ -1,59 +1,158 @@
 #!/bin/bash
 # yappie — Toggle dictation on Wayland.
 # Press once to record, press again to transcribe and paste.
-# Requires: pw-record, ncat, jq, ydotool, wl-copy, notify-send, hyprctl
+# Requires: pw-record, curl, ncat, jq, ydotool, wl-copy, notify-send, hyprctl
 
 set -euo pipefail
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/yappie"
-HOST="localhost"
-PORT="9876"
+CONFIG_FILE="$CONFIG_DIR/config.toml"
+RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+PIDFILE="$RUNTIME_DIR/yappie.pid"
+AUDIO="$RUNTIME_DIR/yappie.wav"
+WCLASSFILE="$RUNTIME_DIR/yappie.wclass"
 
-# Load host/port from config if present
-if [ -f "$CONFIG_DIR/config" ]; then
-    eval "$(grep -E '^(HOST|PORT)=' "$CONFIG_DIR/config")"
-fi
+# ---------------------------------------------------------------------------
+# TOML config parser (subset: [[backend]] tables with string/integer values)
+# ---------------------------------------------------------------------------
 
-PIDFILE="/tmp/yappie.pid"
-AUDIO="/tmp/yappie.wav"
-WCLASSFILE="/tmp/yappie.wclass"
+declare -a BACKEND_NAME=() BACKEND_TYPE=() BACKEND_URL=() BACKEND_MODEL=()
+declare -a BACKEND_API_KEY=() BACKEND_API_KEY_FILE=() BACKEND_HOST=() BACKEND_PORT=()
+BACKEND_COUNT=0
 
-# Auto-start transcription server if not running
-if ! ncat -z "$HOST" "$PORT" 2>/dev/null; then
-    nohup yappie-server >"${XDG_RUNTIME_DIR:-/tmp}/yappie-server.log" 2>&1 &
-    for _ in $(seq 1 30); do
-        ncat -z "$HOST" "$PORT" 2>/dev/null && break
-        sleep 0.5
-    done
-    if ! ncat -z "$HOST" "$PORT" 2>/dev/null; then
-        notify-send -u critical -t 5000 "Dictation" "Server failed to start"
+parse_config() {
+    [[ -f "$CONFIG_FILE" ]] || {
+        notify-send -u critical -t 5000 "Dictation" "No config at $CONFIG_FILE"
         exit 1
-    fi
-fi
+    }
 
-# If recording, stop and transcribe
+    local idx=-1
+
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" ]] && continue
+
+        if [[ "$line" == "[[backend]]" ]]; then
+            ((idx++))
+            BACKEND_COUNT=$((idx + 1))
+            BACKEND_NAME[$idx]=""
+            BACKEND_TYPE[$idx]=""
+            BACKEND_URL[$idx]=""
+            BACKEND_MODEL[$idx]=""
+            BACKEND_API_KEY[$idx]=""
+            BACKEND_API_KEY_FILE[$idx]=""
+            BACKEND_HOST[$idx]="127.0.0.1"
+            BACKEND_PORT[$idx]="9876"
+            continue
+        fi
+
+        ((idx < 0)) && continue
+
+        local key val
+        if [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
+            key="${BASH_REMATCH[1]}"
+            val="${BASH_REMATCH[2]}"
+        elif [[ "$line" =~ ^([a-z_]+)[[:space:]]*=[[:space:]]*([0-9]+) ]]; then
+            key="${BASH_REMATCH[1]}"
+            val="${BASH_REMATCH[2]}"
+        else
+            continue
+        fi
+
+        case "$key" in
+            name)         BACKEND_NAME[$idx]="$val" ;;
+            type)         BACKEND_TYPE[$idx]="$val" ;;
+            url)          BACKEND_URL[$idx]="$val" ;;
+            model)        BACKEND_MODEL[$idx]="$val" ;;
+            api_key)      BACKEND_API_KEY[$idx]="$val" ;;
+            api_key_file) BACKEND_API_KEY_FILE[$idx]="$val" ;;
+            host)         BACKEND_HOST[$idx]="$val" ;;
+            port)         BACKEND_PORT[$idx]="$val" ;;
+        esac
+    done < "$CONFIG_FILE"
+
+    ((BACKEND_COUNT > 0)) || {
+        notify-send -u critical -t 5000 "Dictation" "No backends configured in $CONFIG_FILE"
+        exit 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Transcription backends
+# ---------------------------------------------------------------------------
+
+transcribe_api() {
+    local idx=$1
+    local url="${BACKEND_URL[$idx]}"
+    local model="${BACKEND_MODEL[$idx]}"
+    local api_key="${BACKEND_API_KEY[$idx]}"
+    local api_key_file="${BACKEND_API_KEY_FILE[$idx]}"
+
+    # Resolve API key from file if not inline
+    if [[ -z "$api_key" && -n "$api_key_file" ]]; then
+        local expanded="${api_key_file/#\~/$HOME}"
+        [[ -f "$expanded" ]] && api_key=$(<"$expanded")
+    fi
+
+    url="${url%/}"
+
+    local curl_args=(-s -f --connect-timeout 3 --max-time 30)
+    [[ -n "$api_key" ]] && curl_args+=(-H "Authorization: Bearer $api_key")
+    curl_args+=(-F "file=@${AUDIO};type=audio/wav")
+    [[ -n "$model" ]] && curl_args+=(-F "model=$model")
+
+    local response
+    response=$(curl "${curl_args[@]}" "${url}/audio/transcriptions" 2>/dev/null) || return 1
+
+    local text
+    text=$(jq -r '.text // empty' <<< "$response" 2>/dev/null)
+    [[ -z "$text" ]] && text="$response"
+
+    [[ -n "$text" ]] && echo "$text" || return 1
+}
+
+transcribe_tcp() {
+    local idx=$1
+    local host="${BACKEND_HOST[$idx]}"
+    local port="${BACKEND_PORT[$idx]}"
+
+    local text
+    text=$(ncat -w 5 "$host" "$port" < "$AUDIO" 2>/dev/null) || return 1
+
+    [[ "$text" == ERROR:* ]] && return 1
+    [[ -n "$text" ]] && echo "$text" || return 1
+}
+
+transcribe() {
+    local i text
+    for ((i = 0; i < BACKEND_COUNT; i++)); do
+        case "${BACKEND_TYPE[$i]}" in
+            api) text=$(transcribe_api "$i") && { echo "$text"; return 0; } ;;
+            tcp) text=$(transcribe_tcp "$i") && { echo "$text"; return 0; } ;;
+        esac
+    done
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Main — toggle recording
+# ---------------------------------------------------------------------------
+
+parse_config
+
 PID=$(cat "$PIDFILE" 2>/dev/null) || true
-if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+    # Stop recording and transcribe
     kill "$PID" 2>/dev/null
-    wait "$PID" 2>/dev/null || true
     rm -f "$PIDFILE"
 
-    # Transcribe via unix socket
-    TEXT=$(echo "$AUDIO" | ncat "$HOST" "$PORT")
-
+    TEXT=$(transcribe || true)
     rm -f "$AUDIO"
 
-    # Check for server-side errors
-    if echo "$TEXT" | grep -q "^ERROR:"; then
-        ERRMSG=$(echo "$TEXT" | sed 's/^ERROR://')
-        if echo "$ERRMSG" | grep -qi "cuda\|cublas\|memory"; then
-            notify-send -u critical -t 5000 "Dictation" "GPU out of memory — close GPU apps and retry"
-        else
-            notify-send -u critical -t 5000 "Dictation" "Transcription error: $ERRMSG"
-        fi
-    elif [ -n "$TEXT" ]; then
+    if [[ -n "$TEXT" ]]; then
         wl-copy "$TEXT"
-        # Use window class captured at record-start time
         WCLASS=$(cat "$WCLASSFILE" 2>/dev/null) || true
         rm -f "$WCLASSFILE"
         case "$WCLASS" in
@@ -68,11 +167,10 @@ if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
         notify-send -t 2000 "Dictation" "No speech detected"
     fi
 else
-    # Capture window class now (before transcription delay)
+    # Start recording
     hyprctl activewindow -j | jq -r '.class' > "$WCLASSFILE" &
-
     rm -f "$AUDIO"
     pw-record --rate 16000 "$AUDIO" &
-    echo $! > "$PIDFILE"
+    echo "$!" > "$PIDFILE"
     notify-send -t 1500 "Dictation" "Recording..."
 fi
