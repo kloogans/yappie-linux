@@ -1,20 +1,20 @@
 #!/bin/bash
-# Uninstall hypr-dictate
+# Uninstall yappie
 
 set -euo pipefail
 
 BIN_DIR="${HOME}/.local/bin"
-VENV_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/hypr-dictate/venv"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr-dictate"
+VENV_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/yappie/venv"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/yappie"
 
-echo "Uninstalling hypr-dictate..."
+echo "Uninstalling yappie..."
 
 # Stop server if running
-pkill -f hypr-dictate-server 2>/dev/null && echo "Stopped server" || true
-rm -f "${XDG_RUNTIME_DIR:-/tmp}/hypr-dictate.sock"
+pkill -f yappie-server 2>/dev/null && echo "Stopped server" || true
+rm -f "${XDG_RUNTIME_DIR:-/tmp}/yappie.sock"
 
 # Remove scripts
-rm -f "$BIN_DIR/hypr-dictate" "$BIN_DIR/hypr-dictate-server"
+rm -f "$BIN_DIR/yappie" "$BIN_DIR/yappie-server"
 
 # Remove venv
 if [ -d "$VENV_DIR" ]; then

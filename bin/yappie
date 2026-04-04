@@ -1,25 +1,31 @@
 #!/bin/bash
-# hypr-dictate — Toggle dictation on Hyprland/Wayland.
+# yappie — Toggle dictation on Wayland.
 # Press once to record, press again to transcribe and paste.
 # Requires: pw-record, ncat, jq, ydotool, wl-copy, notify-send, hyprctl
 
 set -euo pipefail
 
-RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
-SOCK_PATH="$RUNTIME_DIR/hypr-dictate.sock"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/yappie"
+HOST="localhost"
+PORT="9876"
 
-PIDFILE="/tmp/hypr-dictate.pid"
-AUDIO="/tmp/hypr-dictate.wav"
-WCLASSFILE="/tmp/hypr-dictate.wclass"
+# Load host/port from config if present
+if [ -f "$CONFIG_DIR/config" ]; then
+    eval "$(grep -E '^(HOST|PORT)=' "$CONFIG_DIR/config")"
+fi
+
+PIDFILE="/tmp/yappie.pid"
+AUDIO="/tmp/yappie.wav"
+WCLASSFILE="/tmp/yappie.wclass"
 
 # Auto-start transcription server if not running
-if [ ! -S "$SOCK_PATH" ]; then
-    nohup hypr-dictate-server >"${RUNTIME_DIR}/hypr-dictate-server.log" 2>&1 &
+if ! ncat -z "$HOST" "$PORT" 2>/dev/null; then
+    nohup yappie-server >"${XDG_RUNTIME_DIR:-/tmp}/yappie-server.log" 2>&1 &
     for _ in $(seq 1 30); do
-        [ -S "$SOCK_PATH" ] && break
+        ncat -z "$HOST" "$PORT" 2>/dev/null && break
         sleep 0.5
     done
-    if [ ! -S "$SOCK_PATH" ]; then
+    if ! ncat -z "$HOST" "$PORT" 2>/dev/null; then
         notify-send -u critical -t 5000 "Dictation" "Server failed to start"
         exit 1
     fi
@@ -33,7 +39,7 @@ if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
     rm -f "$PIDFILE"
 
     # Transcribe via unix socket
-    TEXT=$(echo "$AUDIO" | ncat -U "$SOCK_PATH")
+    TEXT=$(echo "$AUDIO" | ncat "$HOST" "$PORT")
 
     rm -f "$AUDIO"
 

@@ -5,7 +5,7 @@ Listens on a unix socket for audio file paths, transcribes them, and
 returns the text. The model stays loaded between requests so subsequent
 transcriptions are fast (~150ms).
 
-Configuration via ~/.config/hypr-dictate/config (shell-sourceable):
+Configuration via ~/.config/yappie/config (shell-sourceable):
     BACKEND=faster-whisper    # faster-whisper, moonshine, or parakeet
     MODEL=large-v3-turbo
     DEVICE=cuda
@@ -115,7 +115,7 @@ BACKEND_DEFAULTS = {
 def load_config():
     config_dir = os.path.join(
         os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
-        "hypr-dictate",
+        "yappie",
     )
     config_file = os.path.join(config_dir, "config")
 
@@ -144,11 +144,11 @@ def main():
 
     # Set up CUDA library path if specified (re-exec once to inherit LD_LIBRARY_PATH)
     cuda_path = config.get("CUDA_LIB_PATH", "")
-    if cuda_path and not os.environ.get("_HYPR_DICTATE_REEXEC"):
+    if cuda_path and not os.environ.get("_YAPPIE_REEXEC"):
         os.environ["LD_LIBRARY_PATH"] = (
             cuda_path + ":" + os.environ.get("LD_LIBRARY_PATH", "")
         )
-        os.environ["_HYPR_DICTATE_REEXEC"] = "1"
+        os.environ["_YAPPIE_REEXEC"] = "1"
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
     backend_name = config["BACKEND"]
@@ -160,33 +160,64 @@ def main():
         )
         sys.exit(1)
 
-    sock_path = os.path.join(runtime_dir, "hypr-dictate.sock")
+    host = config.get("HOST", "0.0.0.0")
+    port = int(config.get("PORT", "9876"))
 
     print(f"Loading {backend_name} ({config['MODEL']})...", flush=True)
     backend = BACKENDS[backend_name](config)
-    print(f"Ready, listening on {sock_path}", flush=True)
+    print(f"Ready, listening on {host}:{port}", flush=True)
 
-    if os.path.exists(sock_path):
-        os.remove(sock_path)
-
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(sock_path)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((host, port))
     server.listen(1)
 
     while True:
         conn, _ = server.accept()
         try:
-            audio_path = conn.recv(4096).decode().strip()
-            if not audio_path or not os.path.exists(audio_path):
-                conn.sendall(b"")
-                continue
-            text = backend.transcribe(audio_path)
-            conn.sendall(text.encode())
+            handle_connection(conn, backend)
         except Exception as e:
             print(f"Error: {e}", flush=True)
-            conn.sendall(f"ERROR:{e}".encode())
+            try:
+                conn.sendall(f"ERROR:{e}".encode())
+            except Exception:
+                pass
         finally:
             conn.close()
+
+
+def handle_connection(conn, backend):
+    import tempfile
+
+    # Peek at first 4 bytes to detect protocol
+    first = conn.recv(4096)
+    if not first:
+        conn.sendall(b"")
+        return
+
+    if first[:4] == b"RIFF":
+        # Raw WAV audio — read all data, write to temp file, transcribe
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp.write(first)
+        while True:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            tmp.write(chunk)
+        tmp.close()
+        try:
+            text = backend.transcribe(tmp.name)
+            conn.sendall(text.encode())
+        finally:
+            os.unlink(tmp.name)
+    else:
+        # File path — original protocol
+        audio_path = first.decode().strip()
+        if not audio_path or not os.path.exists(audio_path):
+            conn.sendall(b"")
+            return
+        text = backend.transcribe(audio_path)
+        conn.sendall(text.encode())
 
 
 if __name__ == "__main__":

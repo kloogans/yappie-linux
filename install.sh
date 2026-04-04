@@ -1,15 +1,15 @@
 #!/bin/bash
-# Install hypr-dictate
+# Install yappie
 
 set -euo pipefail
 
 BIN_DIR="${HOME}/.local/bin"
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/hypr-dictate"
-VENV_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/hypr-dictate/venv"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/yappie"
+VENV_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/yappie/venv"
 
 BACKEND="${1:-faster-whisper}"
 
-echo "Installing hypr-dictate (backend: $BACKEND)..."
+echo "Installing yappie (backend: $BACKEND)..."
 
 # Check dependencies
 MISSING=()
@@ -56,12 +56,12 @@ esac
 
 # Install scripts
 mkdir -p "$BIN_DIR"
-cp bin/hypr-dictate "$BIN_DIR/"
-chmod +x "$BIN_DIR/hypr-dictate"
+cp bin/yappie "$BIN_DIR/"
+chmod +x "$BIN_DIR/yappie"
 
 # Install server with correct shebang for the venv
-sed "1s|.*|#!${VENV_DIR}/bin/python3|" bin/hypr-dictate-server > "$BIN_DIR/hypr-dictate-server"
-chmod +x "$BIN_DIR/hypr-dictate-server"
+sed "1s|.*|#!${VENV_DIR}/bin/python3|" bin/yappie-server > "$BIN_DIR/yappie-server"
+chmod +x "$BIN_DIR/yappie-server"
 
 # Create config directory with example config
 mkdir -p "$CONFIG_DIR"
@@ -88,7 +88,7 @@ fi
 echo ""
 echo "Done! Add this to your Hyprland config (e.g. ~/.config/hypr/bindings.conf):"
 echo ""
-echo "  bindd = SUPER, D, Dictation, exec, hypr-dictate"
+echo "  bindd = SUPER, D, Dictation, exec, yappie"
 echo ""
 echo "The model downloads automatically on first use."
 echo ""
