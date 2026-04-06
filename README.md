@@ -1,35 +1,36 @@
 # yappie-linux
 
-Voice dictation for Wayland. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on.
+Voice dictation for Linux. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on. Works on any Wayland compositor.
 
-Part of the [yappie](https://github.com/kloogans) family. Local dictation for every platform.
+Runs as a lightweight daemon that keeps your whisper model loaded in memory, so transcription starts the moment you stop talking. Supports on-device transcription via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with GPU acceleration, cloud APIs, or both with automatic fallback.
 
-Yappie is a thin client. It records audio, sends it to any transcription backend you configure, and pastes the result. Bring your own backend: a local server, a cloud API, or both with automatic fallback.
+Part of the [yappie](https://github.com/kloogans) family.
 
 ## How it works
 
-1. Press your dictation key to start recording via PipeWire
-2. Press it again to stop
-3. Yappie sends the audio to your configured backends in order until one succeeds
-4. The transcribed text is copied to your clipboard and pasted into the focused window
+1. The `yappied` daemon starts and loads your whisper model onto the GPU
+2. Press your dictation key. Yappie captures audio from PipeWire directly into memory
+3. Press it again. Audio goes straight to whisper.cpp for transcription (no temp files, no disk I/O)
+4. Transcribed text is copied to your clipboard and pasted into the focused window
+
+The daemon stays responsive while transcription runs in the background. You can check status, swap models, or start a new recording the moment the previous one finishes.
 
 ## Install
 
 ### Arch Linux (AUR)
 
 ```bash
-yay -S yappie
+yay -S yappie    # or paru, pikaur, etc.
 ```
 
-Copy the example config and edit it:
+For on-device transcription, also install whisper.cpp:
 
 ```bash
-mkdir -p ~/.config/yappie
-cp /usr/share/yappie/config.example.toml ~/.config/yappie/config.toml
-$EDITOR ~/.config/yappie/config.toml
+yay -S whisper.cpp           # CPU + Vulkan
+# or: yay -S whisper.cpp-cuda   # NVIDIA CUDA
 ```
 
-### From source
+### Any distro (from source)
 
 ```bash
 git clone https://github.com/kloogans/yappie-linux.git
@@ -37,25 +38,77 @@ cd yappie-linux
 bash install.sh
 ```
 
-Then edit `~/.config/yappie/config.toml` to add at least one backend.
+Requires: `meson`, `ninja`, `gcc`, `libpipewire`, `libcurl`. Optional: `whisper.cpp` for local transcription.
 
-### Keybinding
+## Quick start
 
-Bind `yappie` to a key in your compositor. For example, in Hyprland:
+```bash
+# Set up config
+mkdir -p ~/.config/yappie
+cp /usr/share/yappie/config.example.toml ~/.config/yappie/config.toml
+$EDITOR ~/.config/yappie/config.toml
+
+# Download a model (if using local transcription)
+yappie model download base.en
+
+# Start the daemon
+systemctl --user enable --now yappied
+
+# Bind to a key and go
+yappie toggle
+```
+
+## CLI
 
 ```
-bindd = SUPER, D, Dictation, exec, yappie
+yappie toggle                  Start/stop recording
+yappie status                  Show daemon state
+yappie config                  Show loaded backends
+
+yappie model list              Available models and download status
+yappie model download <name>   Download a model from HuggingFace
+yappie model use <name>        Hot-swap the active model (no restart)
+
+yappie shutdown                Stop the daemon
 ```
 
-In Sway:
+## Models
 
-```
-bindsym $mod+d exec yappie
+Models are downloaded from HuggingFace and stored in `~/.local/share/yappie/models/`. The `.en` variants are English-only and faster.
+
+| Model | Size | RAM | Notes |
+|---|---|---|---|
+| `tiny.en` | 75 MB | ~1 GB | Fastest, lowest accuracy |
+| `base.en` | 142 MB | ~1 GB | Good balance for short dictation |
+| `small.en` | 466 MB | ~2 GB | Better accuracy |
+| `medium.en` | 1.5 GB | ~5 GB | High accuracy |
+| `large-v3-turbo` | 1.6 GB | ~6 GB | Best speed/accuracy ratio |
+| `large-v3` | 2.9 GB | ~10 GB | Maximum accuracy |
+
+Drop the `.en` suffix for multilingual models with auto language detection.
+
+Swap models on the fly without restarting the daemon:
+
+```bash
+yappie model use small.en
 ```
 
 ## Backends
 
-Yappie supports two backend types. Configure one or more in `~/.config/yappie/config.toml`. Backends are tried in order, and the first success wins.
+Yappie supports three backend types. Configure one or more in `~/.config/yappie/config.toml`. Backends are tried in order, and the first success wins.
+
+### Local whisper.cpp (on-device)
+
+No network, no API keys. Audio goes straight from your microphone to the model. Supports CPU and GPU acceleration (CUDA, Vulkan).
+
+```toml
+[[backend]]
+name = "local"
+type = "local"
+model = "base.en"
+# language = "en"    # omit for auto-detect
+# gpu = true         # default
+```
 
 ### OpenAI-compatible API
 
@@ -99,56 +152,91 @@ port = 9876
 
 `~/.config/yappie/config.toml`
 
-Backends are tried in the order they appear. You can mix API and TCP backends freely.
+Backends are tried in the order they appear. You can mix all three types freely. A common setup is local whisper as the primary with a cloud API as fallback:
 
 ```toml
-# Local server as primary, cloud as fallback
 [[backend]]
 name = "local"
-type = "api"
-url = "http://localhost:8000/v1"
-model = "deepdml/faster-whisper-large-v3-turbo-ct2"
+type = "local"
+model = "base.en"
 
 [[backend]]
 name = "groq"
 type = "api"
 url = "https://api.groq.com/openai/v1"
 model = "whisper-large-v3-turbo"
-api_key = "gsk_..."
+api_key_file = "~/.config/yappie/keys/groq"
 ```
+
+## Keybinding
+
+Bind `yappie toggle` to a key in your compositor.
+
+Hyprland:
+
+```
+bindd = SUPER, D, Dictation, exec, yappie toggle
+```
+
+Sway:
+
+```
+bindsym $mod+d exec yappie toggle
+```
+
+Any other Wayland compositor works too. Yappie detects Hyprland and Sway for smart terminal paste (Ctrl+Shift+V), and falls back to Ctrl+V everywhere else.
 
 ## Dependencies
 
+Installed automatically via the AUR package or `install.sh`:
+
 | Package | Used for |
 |---|---|
-| PipeWire | Audio recording (`pw-record`) |
-| curl | API backend requests |
-| nmap | TCP backend communication (`ncat`) |
-| jq | JSON parsing |
+| PipeWire | Audio capture |
+| libcurl | API backends and model downloads |
 | ydotool | Simulated keypresses for pasting |
-| wl-clipboard | Clipboard access (`wl-copy`) |
+| wl-clipboard | Clipboard access |
 | libnotify | Desktop notifications |
 
-**Optional** (for smart terminal paste detection):
+**Optional:**
 
-| Package | Compositor |
+| Package | Used for |
 |---|---|
-| Hyprland | `hyprctl` |
-| Sway | `swaymsg` |
+| whisper.cpp | On-device transcription |
+| Hyprland / Sway | Smart terminal paste detection |
 
-Without either, yappie defaults to Ctrl+V for all windows. With one installed, it detects terminals and uses Ctrl+Shift+V instead.
+## Architecture
 
-On Arch:
+Yappie is two binaries built from one C project:
+
+- **`yappied`** is a persistent daemon that keeps your whisper model loaded in GPU memory, captures audio via PipeWire, and handles transcription. It uses PipeWire's event loop for IPC and audio, with a worker thread for blocking operations (inference, network, paste).
+- **`yappie`** is a thin CLI that sends commands to the daemon over a Unix socket.
+
+Audio is captured as 16kHz mono float samples and passed directly to whisper.cpp with no intermediate WAV encoding or disk I/O. WAV encoding only happens for remote API and TCP backends, and even then it's done in memory.
+
+## Building
 
 ```bash
-sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify
+meson setup build --buildtype=release
+meson compile -C build
+```
+
+Build options:
+
+```
+-Dwhisper=enabled|disabled|auto    Local transcription (default: auto-detect)
+-Dsystemd=enabled|disabled|auto    systemd notify support (default: auto-detect)
 ```
 
 ## Uninstall
 
+If installed from source:
+
 ```bash
 bash uninstall.sh
 ```
+
+If installed from AUR, just remove the package.
 
 ## License
 

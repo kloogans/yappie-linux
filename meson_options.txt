@@ -1,0 +1,4 @@
+option('systemd', type: 'feature', value: 'auto',
+       description: 'systemd sd_notify support')
+option('whisper', type: 'feature', value: 'auto',
+       description: 'Local transcription via whisper.cpp (disable for remote-only builds)')

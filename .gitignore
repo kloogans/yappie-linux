@@ -1,0 +1,5 @@
+build/
+subprojects/tomlc99/
+subprojects/cjson/
+pkg/
+*.pkg.tar.zst

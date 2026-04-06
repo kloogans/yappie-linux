@@ -1,34 +1,44 @@
 #!/bin/bash
-# Install yappie
+# Install yappie from source using Meson
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BIN_DIR="${HOME}/.local/bin"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/yappie"
+SERVICE_DIR="${HOME}/.config/systemd/user"
 
-echo "Installing yappie..."
+echo "Building yappie..."
 
-# Check dependencies
+# Check build dependencies
+for cmd in meson ninja gcc pkg-config; do
+    command -v "$cmd" >/dev/null 2>&1 || {
+        echo "Missing build dependency: $cmd"
+        echo "On Arch Linux: sudo pacman -S meson ninja gcc pkgconf"
+        exit 1
+    }
+done
+
+# Check runtime dependencies
 MISSING=()
-for cmd in pw-record curl ncat jq ydotool wl-copy notify-send; do
+for cmd in ydotool wl-copy notify-send; do
     command -v "$cmd" >/dev/null 2>&1 || MISSING+=("$cmd")
 done
 
 if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "Missing dependencies: ${MISSING[*]}"
+    echo "Missing runtime dependencies: ${MISSING[*]}"
     echo ""
     echo "On Arch Linux:"
-    echo "  sudo pacman -S pipewire curl nmap jq ydotool wl-clipboard libnotify"
+    echo "  sudo pacman -S ydotool wl-clipboard libnotify"
     echo ""
     echo "Install missing packages and re-run this script."
     exit 1
 fi
 
-# Install script
-mkdir -p "$BIN_DIR"
-cp "$SCRIPT_DIR/bin/yappie" "$BIN_DIR/"
-chmod +x "$BIN_DIR/yappie"
+# Build
+cd "$SCRIPT_DIR"
+meson setup build --prefix="$HOME/.local" --buildtype=release 2>/dev/null || meson setup build --prefix="$HOME/.local" --buildtype=release --wipe
+meson compile -C build
+meson install -C build
 
 # Create config directory with example config
 mkdir -p "$CONFIG_DIR"
@@ -39,10 +49,15 @@ else
     echo "Config already exists at $CONFIG_DIR/config.toml (not overwritten)"
 fi
 
+# Install systemd service
+mkdir -p "$SERVICE_DIR"
+sed "s|/usr/bin/yappied|$HOME/.local/bin/yappied|" "$SCRIPT_DIR/data/yappied.service" > "$SERVICE_DIR/yappied.service"
+
 echo ""
-echo "Done! Edit $CONFIG_DIR/config.toml to configure your backends."
+echo "Done! Next steps:"
 echo ""
-echo "Then add this to your Hyprland config (e.g. ~/.config/hypr/bindings.conf):"
-echo ""
-echo "  bindd = SUPER, D, Dictation, exec, yappie"
+echo "  1. Edit config:  \$EDITOR $CONFIG_DIR/config.toml"
+echo "  2. (Optional) Download a model:  yappie model download base.en"
+echo "  3. Start daemon:  systemctl --user enable --now yappied"
+echo "  4. Bind key:  yappie toggle"
 echo ""

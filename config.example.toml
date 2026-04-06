@@ -2,9 +2,18 @@
 # Backends are tried in order. First success wins.
 # Docs: https://github.com/kloogans/yappie-linux
 
-# --- Local server (e.g. faster-whisper-server, LocalAI) ---
+# --- Local whisper.cpp (on-device, no network) ---
+# Requires: yappie model download base.en
 # [[backend]]
 # name = "local"
+# type = "local"
+# model = "base.en"
+# # language = "en"    # omit for auto-detect
+# # gpu = true         # default: use GPU if available
+
+# --- Local server (e.g. faster-whisper-server, LocalAI) ---
+# [[backend]]
+# name = "local-server"
 # type = "api"
 # url = "http://localhost:8000/v1"
 # model = "large-v3-turbo"
