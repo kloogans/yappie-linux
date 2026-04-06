@@ -1,8 +1,22 @@
-# yappie-linux
+<p align="center">
+  <img src="assets/yappie-logo.png" width="200" alt="Yappie logo" />
+</p>
 
-Voice dictation for Linux. Press a key, talk, press again, and the transcribed text gets pasted into whatever window you're focused on. Works on any Wayland compositor.
+<p align="center" style="text-decoration:none;">
+  <strong style="font-size:2em;">Yappie</strong>
+</p>
 
-Runs as a lightweight daemon that keeps your whisper model loaded in memory, so transcription starts the moment you stop talking. Supports on-device transcription via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with GPU acceleration, cloud APIs, or both with automatic fallback.
+<p align="center">
+  Fast, private dictation for Linux. On-device or cloud. Your choice.
+</p>
+
+---
+
+Press a key, talk, press again, and your words appear wherever your cursor is. Yappie runs as a lightweight daemon that keeps your Whisper model loaded in GPU memory, so transcription starts the moment you stop talking. Your audio never leaves the device unless you want it to.
+
+Works on any Wayland compositor. Supports on-device transcription via [whisper.cpp](https://github.com/ggml-org/whisper.cpp) with GPU acceleration, cloud APIs, or both with automatic fallback.
+
+> **Looking for the macOS version?** Check out [Yappie for macOS](https://github.com/kloogans/yappie).
 
 Part of the [yappie](https://github.com/kloogans) family.
 
